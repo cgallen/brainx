@@ -144,7 +144,7 @@ def threshold_adjacency_matrix(adj_matrix, cost, uptri=False):
     np.fill_diagonal(adj_matrix, 0) #zero out diagonal
     if uptri: #also zero out below diagonal
         adj_matrix = np.triu(adj_matrix) 
-    return adj_matrix, expected_cost 
+    return adj_matrix, expected_cost
 
 def find_true_cost(boolean_matrix):
     """ when passed a boolean matrix, presumably from thresholding to 
