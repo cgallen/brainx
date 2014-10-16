@@ -12,6 +12,52 @@ import networkx as nx
 #-----------------------------------------------------------------------------
 # Functions
 #-----------------------------------------------------------------------------
+
+def dictset_to_listset(dict_set):
+    """ converts a dict of sets to a list of sets
+    for converting partition.community objects"""
+    if  isinstance(dict_set, dict) \
+        and _contains_only(dict_set, set):
+        return dict_set.values()
+        
+    raise ValueError('{0} is not a dict of sets'.format(dict_set))
+   
+def listset_to_dictset(list_set):
+    """ converts a list of sets to a dict of sets
+    for converting partition.community objects"""
+    ## check input is dict of sets
+    if isinstance(list_set, list) and \
+        _contains_only(list_set, set):
+        return {val: value for val, value in enumerate(list_set)}
+    raise ValueError('{0} is not a list of sets'.format(list_set))
+
+def _no_repeats_in_listlist(list_list):
+    """ checks for duplicates in list of lists
+    returns True or False"""
+    if isinstance(list_list, list) and \
+        _contains_only(list_list, list):
+        allitems = [item for sublist in list_list for item in sublist]
+        return len(allitems) == len(set(allitems))
+    raise ValueError('{0} is not a list of lists'.format(list_list))
+
+def _contains_only(container, type):
+    """check that contents of a container are all of the same type"""
+    try:
+        container = container.values()  # dict
+    except AttributeError:
+        pass
+
+    return all(isinstance(s, type) for s in container)
+
+def listlist_to_listset(list_list):
+    """ converts list of lists to a list of sets (with check)
+    for converting partition.community objects"""
+    if _no_repeats_in_listlist(list_list):
+        return [set(x) for x in list_list] 
+    else:
+        raise ValueError('found duplicate(s) in {0}, cannot validly format to '\
+            'list of sets'.format(list_list))
+
 def slice_data(data, sub, block, subcond=None):
     """ pull symmetric matrix from data block (4D or 5D)
     
@@ -116,7 +162,47 @@ def format_matrix2(data, s, sc, c, lk, co, idc=[],
         return ~(cmat == 0)
     return cmat
 
-def threshold_adjacency_matrix(adj_matrix, cost, uptri=False):
+def format_matrix3(data, s, c, b, lk, co, idc=[],
+        costlist=[], nouptri=False, asbool=True):
+    """ Function which formats matrix for a particular subject and 
+    particular block (thresholds, upper-tris it) so that we can 
+    make a graph object out of it
+
+    Parameters
+    ----------
+    data : numpy array
+        full data array 5D (subcondition, condition, subject, node, node) 
+    s : int
+        index of subject
+    c : int
+        index of condition
+    b : int
+        index of block
+    lk : numpy array
+        lookup table for thresholds at each possible cost
+    co : float
+        cost value to threshold at
+    idc : float
+        ideal cost 
+    costlist : list
+        list of possible costs
+    nouptri : bool
+        False zeros out diag and below, True returns symmetric matrix
+    asbool : bool
+        If true returns boolean mask, otherwise returns thresholded w
+        weighted matrix
+    """
+    cmat = slice_data(data, s, b, c) 
+    th = cost2thresh2(co,s,c,b,lk,[],idc,costlist) #get the right threshold
+    cmat = thresholded_arr(cmat,th,fill_val=0)
+    if not nouptri:
+        cmat = np.triu(cmat,1)
+    if asbool:
+        # return boolean mask
+        return ~(cmat == 0)
+    return cmat
+
+def threshold_adjacency_matrix(adj_matrix, cost, uptri=False, return_thresh = False):
     """threshold adj_matrix at cost
     
     Parameters
@@ -127,12 +213,16 @@ def threshold_adjacency_matrix(adj_matrix, cost, uptri=False):
         user specified cost
     uptri : bool
         False returns symmetric matrix, True zeros out diagonal and below
+    return_thresh: bool
+        False returns thresholded correlation matrix and expected cost, True also returns the threshold value 
     Returns
     -------
     thresholded : array of bools
         binary matrix thresholded to result in cost
     expected_cost : float
         the real cost value (closest to cost)
+    thresh (optional): float
+        the real threshold value used to result in cost
     """
     nnodes, _ = adj_matrix.shape
     ind = np.triu_indices(nnodes, 1)
@@ -144,7 +234,12 @@ def threshold_adjacency_matrix(adj_matrix, cost, uptri=False):
     np.fill_diagonal(adj_matrix, 0) #zero out diagonal
     if uptri: #also zero out below diagonal
         adj_matrix = np.triu(adj_matrix) 
-    return adj_matrix, expected_cost
+
+    if return_thresh: # also return threshold value
+        return adj_matrix, expected_cost, thresh 
+    else:
+        return adj_matrix, expected_cost
+
 
 def find_true_cost(boolean_matrix):
     """ when passed a boolean matrix, presumably from thresholding to 
@@ -192,7 +287,11 @@ def make_cost_thresh_lookup(adjacency_matrix):
        0.70
 
     """
-
+    ## check for nan in matrix, sorting will behave badly if nan found
+    if np.any(np.isnan(adjacency_matrix)):
+        raise ValueError('NAN found in adjacency matrix, this will cause'\
+                'improper behavior in sorting and improper results, '\
+                'please remove all nan ')
     ind = np.triu_indices_from(adjacency_matrix, k = 1)
     edges = adjacency_matrix[ind]
     nedges = edges.shape[0]
@@ -264,6 +363,26 @@ def store_metrics(b, s, co, metd, arr):
         idx = b,s,co,slice(None)
     else:
         raise ValueError("only know how to handle 3 or 4-d arrays")
+    
+    for met_name, met_val in metd.iteritems():
+        arr[idx][met_name] = met_val
+
+
+def store_metrics2(c, b, s, co, metd, arr):
+    """Store a set of metrics into a structured array
+    c = condition
+    b = block
+    s = subject
+    co = cost? float
+    metd = dict of metrics
+    arr : array?"""
+
+    if arr.ndim == 4:
+        idx = c,b,s,co
+    elif arr.ndim == 5:
+        idx = c,b,s,co,slice(None)
+    else:
+        raise ValueError("only know how to handle 4 or 5-d arrays")
     
     for met_name, met_val in metd.iteritems():
         arr[idx][met_name] = met_val
